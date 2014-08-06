@@ -1,4 +1,4 @@
 caronte
 =======
 
-Redis 2 RabbitMQ 
+Redis 2 RabbitMQ gateway
