@@ -13,15 +13,14 @@ import (
 	"time"
 )
 
-type CaronteMessage struct {
-	Exchange    string
-	Routing_key string
+type caronteMessage struct {
+	Exchange   string
+	Routingkey string
 }
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	log.Println("> Starting Redis Client")
-	go stageMessages()
 	for i := 1; i <= 20; i++ {
 		go getMessages(i)
 	}
@@ -37,66 +36,55 @@ func connectRedis() redis.Conn {
 	return r
 }
 
-func stageMessages() {
-	r := connectRedis()
-	for {
-		for i := 1; i <= 20; i++ {
-			s := []string{"stage", strconv.Itoa(i)}
-			v, _ := r.Do("RPOPLPUSH", "caronte", strings.Join(s, "_"))
-			if v == nil {
-				log.Printf("stager Sleeping!\n")
-				time.Sleep(1 * time.Second) // totally made up waiting time..
-			}
-		}
-	}
-	r.Close()
-}
-
 func getMessages(i int) {
 	r := connectRedis()
 	s := []string{"stage", strconv.Itoa(i)}
 	stage := strings.Join(s, "_")
-
 	for {
+
+		v, _ := r.Do("RPOPLPUSH", "caronte", strings.Join(s, "_"))
+
+		if v == nil {
+			//log.Printf("No new messages on caronte for thread %d\n", i)
+		}
 
 		reply, err := redis.Values(r.Do("LRANGE", stage, "0", "0"))
 
 		if err != nil || len(reply) < 1 {
 
-			log.Printf("getMessage Sleeping!\n")
+			//log.Printf("No queued messages on %s: Sleeping!\n", stage)
 			time.Sleep(2 * time.Second) // totally made up waiting time..
 
 		} else {
 
-			log.Printf("Got message!\n")
+			//log.Printf("Got message!\n")
 
 			var objmap map[string]*json.RawMessage
 			err = json.Unmarshal(reply[0].([]byte), &objmap)
 			if objmap["caronte"] != nil {
 				publishMessage(objmap)
+				r.Do("LPOP", stage)
 			} else {
-				log.Println("Not a valid message!\n")
+				log.Println("Not a valid message!")
 				r.Do("LPOP", stage)
 			}
 		}
 	}
-	r.Close()
 }
 
 func publishMessage(objmap map[string]*json.RawMessage) {
 	amqpURI := "amqp://guest:guest@localhost:5672/"
-
 	j, _ := json.Marshal(objmap["caronte"])
-	var metadata CaronteMessage
+	var metadata caronteMessage
 	err := json.Unmarshal(j, &metadata)
 
-	log.Printf("exchange %s routing_key %s", metadata.Exchange, metadata.Routing_key)
+	//log.Printf("exchange %s Routingkey %s", metadata.Exchange, metadata.Routingkey)
 
 	delete(objmap, "caronte")
 	messageClean, _ := json.Marshal(objmap)
-	log.Printf("body: %s\n", messageClean)
+	//log.Printf("body: %s\n", messageClean)
 
-	log.Printf("dialing %q", amqpURI)
+	//log.Printf("dialing %q", amqpURI)
 	connection, err := amqp.Dial(amqpURI)
 
 	if err != nil {
@@ -111,10 +99,10 @@ func publishMessage(objmap map[string]*json.RawMessage) {
 	}
 
 	if err = channel.Publish(
-		metadata.Exchange,    // publish to an exchange
-		metadata.Routing_key, // routing to 0 or more queues
-		false,                // mandatory
-		false,                // immediate
+		metadata.Exchange,   // publish to an exchange
+		metadata.Routingkey, // routing to 0 or more queues
+		false,               // mandatory
+		false,               // immediate
 		amqp.Publishing{
 			Headers:         amqp.Table{},
 			ContentType:     "text/plain",
