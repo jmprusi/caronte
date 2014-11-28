@@ -7,6 +7,7 @@ import (
 	"github.com/codegangsta/cli"
 	"github.com/garyburd/redigo/redis"
 	"github.com/streadway/amqp"
+	_ "io/ioutil"
 	"log"
 	"os"
 	"runtime"
@@ -66,7 +67,7 @@ func runApp(c *cli.Context) {
 		c.Bool("debug"),
 		c.Int("workers"),
 		c.String("graveyard_exchange"),
-		c.String("graveyar_file"),
+		c.String("graveyard_file"),
 		"output",
 	}
 
@@ -114,8 +115,14 @@ func getMessages(c Config, i int) {
 				}
 				delete(objmap, c.JSONKey)
 				messageClean, _ := json.Marshal(objmap)
-				publishMessage(messageClean, metadata, c)
-				r.Do("LPOP", stage)
+				delivered := publishMessage(messageClean, metadata, c)
+				if delivered {
+					r.Do("LPOP", stage)
+				} else {
+					writeToGraveyardFile(c, reply)
+					r.Do("LPOP", stage)
+
+				}
 			} else {
 				log.Println("Not a valid message!")
 				r.Do("LPOP", stage)
@@ -124,7 +131,7 @@ func getMessages(c Config, i int) {
 	}
 }
 
-func publishMessage(messageClean []byte, metadata caronteMessage, c Config) {
+func publishMessage(messageClean []byte, metadata caronteMessage, c Config) bool {
 	connection, err := amqp.Dial(c.AmqpURI)
 	defer connection.Close()
 
@@ -132,6 +139,12 @@ func publishMessage(messageClean []byte, metadata caronteMessage, c Config) {
 	if err != nil {
 		fmt.Errorf("Channel: %s", err)
 	}
+
+	if err := channel.Confirm(false); err != nil {
+		fmt.Errorf("Channel could not be put into confirm mode: %s", err)
+	}
+
+	ack, nack := channel.NotifyConfirm(make(chan uint64, 1), make(chan uint64, 1))
 
 	if err = channel.Publish(
 		metadata.Exchange,
@@ -147,7 +160,35 @@ func publishMessage(messageClean []byte, metadata caronteMessage, c Config) {
 			Priority:        0,
 		},
 	); err != nil {
-		fmt.Errorf("Exchange Publish: %s", err)
+		panic(err)
 	}
 
+	delivery := confirmOne(ack, nack)
+	if delivery == 1 {
+		return true
+	} else {
+		return false
+	}
+}
+
+func confirmOne(ack, nack chan uint64) uint64 {
+
+	select {
+	case tag := <-ack:
+		return tag
+	case tag := <-nack:
+		return tag
+	}
+}
+
+func writeToGraveyardFile(c Config, reply []interface{}) {
+	log.Println("msg not delivered!")
+	d1 := reply[0].([]byte)
+	f, _ := os.OpenFile(c.GraveyardFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+
+	defer f.Close()
+	_, _ = f.Write(d1)
+	_, _ = f.Write([]byte("\n"))
+
+	f.Sync()
 }
