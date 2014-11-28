@@ -80,9 +80,7 @@ func runApp(c *cli.Context) {
 
 func connectRedis(c Config) redis.Conn {
 	r, err := redis.Dial("tcp", c.RedisHost+":6379")
-	if err != nil {
-		panic(err)
-	}
+	failOnError(err, "Can't connect to Redis")
 	return r
 }
 
@@ -92,10 +90,8 @@ func getMessages(c Config, i int) {
 	stage := strings.Join(s, "_")
 	for {
 
-		v, _ := r.Do("RPOPLPUSH", c.RedisList, strings.Join(s, "_"))
-
-		if v == nil {
-		}
+		_, err := r.Do("RPOPLPUSH", c.RedisList, strings.Join(s, "_"))
+		failOnError(err, "Failed rpoplpush on redis")
 
 		reply, err := redis.Values(r.Do("LRANGE", stage, "0", "0"))
 
@@ -119,7 +115,7 @@ func getMessages(c Config, i int) {
 				if delivered {
 					r.Do("LPOP", stage)
 				} else {
-					writeToGraveyardFile(c, reply)
+					writeToGraveyard(c, reply)
 					r.Do("LPOP", stage)
 
 				}
@@ -135,18 +131,16 @@ func publishMessage(messageClean []byte, metadata caronteMessage, c Config) bool
 	connection, err := amqp.Dial(c.AmqpURI)
 	defer connection.Close()
 
-	channel, err := connection.Channel()
-	if err != nil {
-		fmt.Errorf("Channel: %s", err)
-	}
+	failOnError(err, "Can't connect to rabbitmq")
 
-	if err := channel.Confirm(false); err != nil {
-		fmt.Errorf("Channel could not be put into confirm mode: %s", err)
-	}
+	channel, err := connection.Channel()
+
+	err = channel.Confirm(false)
+	failOnError(err, "Failed to put channel on ack mode")
 
 	ack, nack := channel.NotifyConfirm(make(chan uint64, 1), make(chan uint64, 1))
 
-	if err = channel.Publish(
+	err = channel.Publish(
 		metadata.Exchange,
 		metadata.Routingkey,
 		true,
@@ -159,36 +153,79 @@ func publishMessage(messageClean []byte, metadata caronteMessage, c Config) bool
 			DeliveryMode:    amqp.Persistent,
 			Priority:        0,
 		},
-	); err != nil {
-		panic(err)
-	}
+	)
 
-	delivery := confirmOne(ack, nack)
-	if delivery == 1 {
-		return true
-	} else {
-		return false
-	}
+	failOnError(err, "Failed to publish on rabbitmq")
+
+	return confirmOne(ack, nack)
 }
 
-func confirmOne(ack, nack chan uint64) uint64 {
-
+func confirmOne(ack, nack chan uint64) bool {
+	// Need to improve this.
 	select {
 	case tag := <-ack:
-		return tag
+		if tag == 1 {
+			return true
+		} else {
+			return false
+		}
+
 	case tag := <-nack:
-		return tag
+		if tag == 1 {
+			return true
+		} else {
+			return false
+		}
+
 	}
+
 }
 
 func writeToGraveyardFile(c Config, reply []interface{}) {
 	log.Println("msg not delivered!")
 	d1 := reply[0].([]byte)
-	f, _ := os.OpenFile(c.GraveyardFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-
+	f, err := os.OpenFile(c.GraveyardFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	defer f.Close()
-	_, _ = f.Write(d1)
-	_, _ = f.Write([]byte("\n"))
-
+	_, err = f.Write(d1)
+	_, err = f.Write([]byte("\n"))
 	f.Sync()
+	failOnError(err, "Problem writing a failed message to disk. exiting")
+}
+
+func writeToGraveyardExchange(c Config, reply []interface{}) bool {
+	connection, err := amqp.Dial(c.AmqpURI)
+	defer connection.Close()
+	channel, err := connection.Channel()
+	err = channel.Confirm(false)
+	ack, nack := channel.NotifyConfirm(make(chan uint64, 1), make(chan uint64, 1))
+	err = channel.Publish(
+		c.GraveyardExchange,
+		"",
+		true,
+		false,
+		amqp.Publishing{
+			Headers:         amqp.Table{},
+			ContentType:     "text/plain",
+			ContentEncoding: "UTF-8",
+			Body:            []byte(reply[0].([]byte)),
+			DeliveryMode:    amqp.Persistent,
+			Priority:        0,
+		},
+	)
+	failOnError(err, "Failed to publish on rabbitmq")
+	return confirmOne(ack, nack)
+}
+
+func writeToGraveyard(c Config, reply []interface{}) {
+	if writeToGraveyardExchange(c, reply) == false {
+		writeToGraveyardFile(c, reply)
+	}
+
+}
+
+func failOnError(err error, msg string) {
+	if err != nil {
+		log.Fatalf("%s: %s", msg, err)
+		panic(fmt.Sprintf("%s: %s", msg, err))
+	}
 }
