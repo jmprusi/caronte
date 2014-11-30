@@ -7,7 +7,6 @@ import (
 	"github.com/codegangsta/cli"
 	"github.com/garyburd/redigo/redis"
 	"github.com/streadway/amqp"
-	_ "io/ioutil"
 	"log"
 	"os"
 	"runtime"
