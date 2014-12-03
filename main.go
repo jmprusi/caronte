@@ -37,16 +37,16 @@ func main() {
 	app.Name = "Caronte"
 	app.Usage = "Redis 2 RabbitMQ Transporter"
 	app.Flags = []cli.Flag{
-		cli.StringFlag{"rabbitmq_host", "localhost", "RabbitMQ server host", "rabbitmq_host"},
-		cli.StringFlag{"rabbitmq_user", "guest", "RabbitMQ user", "rabbitmq_user"},
-		cli.StringFlag{"rabbitmq_pass", "guest", "RabbitMQ password", "rabbitmq_password"},
-		cli.StringFlag{"redis_host", "localhost", "Redis server host", "redis_host"},
-		cli.BoolFlag{"debug", "Print debug info stdout", "caronte_debug"},
-		cli.StringFlag{"redis_list", "caronte", "Redis list", "redis_list"},
-		cli.StringFlag{"jsonkey", "caronte", "JSON Key to look for on msgs.", "jsonkey"},
-		cli.IntFlag{"workers", 5, "Number of workers", "caronte_workers"},
-		cli.StringFlag{"graveyard_exchange", "graveyard", "Name of the graveyard exchange on rabbitmq ", "graveyard_exchange"},
-		cli.StringFlag{"graveyard_file", "graveyard", "Name of the graveyard file for dumping msgs when there's no rabbitmq graveyard", "graveyard_file"},
+		cli.StringFlag{Name: "rabbitmq_host", Value: "localhost", Usage: "RabbitMQ server host", EnvVar: "rabbitmq_host"},
+		cli.StringFlag{Name: "rabbitmq_user", Value: "guest", Usage: "RabbitMQ user", EnvVar: "rabbitmq_user"},
+		cli.StringFlag{Name: "rabbitmq_pass", Value: "guest", Usage: "RabbitMQ password", EnvVar: "rabbitmq_password"},
+		cli.StringFlag{Name: "redis_host", Value: "localhost", Usage: "Redis server host", EnvVar: "redis_host"},
+		cli.BoolFlag{Name: "debug", Usage: "Print debug info stdout", EnvVar: "caronte_debug"},
+		cli.StringFlag{Name: "redis_list", Value: "caronte", Usage: "Redis list", EnvVar: "redis_list"},
+		cli.StringFlag{Name: "jsonkey", Value: "caronte", Usage: "JSON Key to look for on msgs.", EnvVar: "jsonkey"},
+		cli.IntFlag{Name: "workers", Value: 5, Usage: "Number of workers", EnvVar: "caronte_workers"},
+		cli.StringFlag{Name: "graveyard_exchange", Value: "graveyard", Usage: "Name of the graveyard exchange on rabbitmq ", EnvVar: "graveyard_exchange"},
+		cli.StringFlag{Name: "graveyard_file", Value: "graveyard", Usage: "Name of the graveyard file for dumping msgs when there's no rabbitmq graveyard", EnvVar: "graveyard_file"},
 	}
 	app.Action = func(c *cli.Context) {
 		runApp(c)
